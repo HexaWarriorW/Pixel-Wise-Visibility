@@ -67,21 +67,3 @@ def print_gradients(model):
             print(f"{name} grad norm: {param.grad.norm().item():.4f}")
         else:
             print(f"{name} grad: None")
-
-def training_loss(pred_t, pred_beta, transmission_map, foggy_img, clean_img, depth_map, epoch, mean_bgr):
-    t_recon = torch.exp(-pred_beta * depth_map)
-    loss_t_consist = F.l1_loss(pred_t, t_recon)
-    loss_t = F.l1_loss(pred_t, transmission_map)
-
-    pred_t = pred_t.clamp(min=0.01, max=1.0)
-    J_recon = (foggy_img - mean_bgr * (1 - pred_t)) / pred_t
-    loss_recon = F.l1_loss(J_recon, clean_img)
-    if epoch < 20:
-        total_loss = loss_t + 0 * loss_t_consist + 0 * loss_recon
-    else:
-        total_loss = loss_t + 0.2 * loss_t_consist + 0.1 * loss_recon
-    return total_loss*10
-
-def train_patchy_loss(pred_t, gt):
-    loss = F.binary_cross_entropy_with_logits(pred_t, gt)
-    return loss

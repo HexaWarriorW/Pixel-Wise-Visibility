@@ -51,17 +51,19 @@ The data is being organized and will be provided upon completion.
 ```bash
 OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 train_ddp.py \
     --save_path <your_path> \
-    --dataset_file <dataset_file> \
+    --root_path <root_path> \
     --batch_size 4 \
     --num_epochs 80 \
     --checkpoint_path <checkpoint_path> \
     --cross_num 3 \
     --resume \
-    --lambda0 1 \
-    --lambda1 0.2 \
-    --lambda2 0.1 \
-    --lambda3 0.4 \
-    --lambda4 0.0
+    --delta1 <delta1> \
+    --delta2 <delta2> \
+    --delta3 <delta3> \
+    --delta4 <delta4> \
+    --lambda1 <lambda1> \
+    --lambda2 <lambda2>
+    
 ```
 ### Evaluation
 ``` bash
