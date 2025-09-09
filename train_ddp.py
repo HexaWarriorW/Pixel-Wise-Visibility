@@ -154,4 +154,5 @@ if __name__ == "__main__":
             'optimizer_state_dict': optimizer.state_dict(),
             'train_loss': train_loss,
         }, os.path.join(save_path, f"epoch{epoch+1}.pth"))
-    dist.destroy_process_group()
+    if ddp:
+        dist.destroy_process_group()
