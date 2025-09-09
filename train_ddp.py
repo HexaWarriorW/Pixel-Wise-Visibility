@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from dataset import PixelwiseDataset
+from dataset import *
 from model import *
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -9,7 +9,7 @@ import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 import torch.nn.functional as F
 import argparse
-
+from einops import rearrange, repeat
 
 def setup(rank, world_size):
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
@@ -25,7 +25,7 @@ def print_gradients(model):
 
 
 def training_loss(pred_t, pred_beta, is_uniform_fog,
-                  transmission_map, beta, foggy_img, clean_img, depth_map, epoch, mean_bgr, uniform_fog):
+                  transmission_map, beta, foggy_img, clean_img, depth_map, epoch, mean_bgr, uniform_fog, need_det=True):
     pred_t = pred_t.clamp(min=0.01, max=1.0)
     t_recon = torch.exp(-pred_beta * depth_map)
     J_recon = (foggy_img - mean_bgr * (1 - pred_t)) / pred_t
@@ -36,19 +36,66 @@ def training_loss(pred_t, pred_beta, is_uniform_fog,
     loss_reI = F.l1_loss(J_recon, clean_img)
     if epoch < 20:
         args.delta3 = 0
-        args.delta3 = 4
+        args.delta4 = 0
     
     loss_vis = args.delta1 * loss_b + args.delta2 * loss_t + args.delta3 * loss_ret + args.delta4 * loss_reI
+    if not need_det:
+        return loss_vis
+
     loss_det = F.binary_cross_entropy_with_logits(is_uniform_fog, uniform_fog)
-    
     total_loss = loss_vis * args.lambda1 + loss_det * args.lambda2
     return total_loss
 
+def train_PD(train_item, model, optimizer, epoch, local_rank):
+    clean_rgb = train_item["clean_rgb"]
+    fog_rgb = train_item["fog_rgb"]
+    vis = train_item["vis"]
+    transmission_map = train_item["transmission_map"]
+    metric_depth_map = train_item["metric_depth_map"]
+    mean_bgr = train_item["mean_bgr"]
+    uniform_fog = train_item["uniform_fog"]
+    clean_rgb, fog_rgb, vis, transmission_map, metric_depth_map, mean_bgr, uniform_fog = clean_rgb.to(local_rank), fog_rgb.to(local_rank), vis.to(local_rank), transmission_map.to(local_rank), metric_depth_map.to(local_rank), mean_bgr.to(local_rank), uniform_fog.to(local_rank)
+    beta = 2.995 / vis
+    optimizer.zero_grad()
+    t_output, beta_output, is_uniform_fog = model(fog_rgb, metric_depth_map)
+    loss = training_loss(t_output, beta_output, is_uniform_fog,
+                            transmission_map, beta, fog_rgb, clean_rgb, metric_depth_map, epoch, mean_bgr, uniform_fog)
+    loss.backward()
+
+    nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+    optimizer.step()
+    return loss
+
+def train_FACID(train_item, model, optimizer, epoch, local_rank):
+    clean_rgb = train_item["Scene"]
+    fog_rgb = train_item["FoggyScene_0.05"]
+    vis = train_item["Visibility"] / 1000
+    transmission_map = train_item["t_0.05"]
+    # ! FACID dataset provides inverse depth
+    metric_depth_map = 1 / train_item["DepthPerspective"]
+    metric_depth_map = torch.clamp(metric_depth_map, min=0, max=5e3) / 1000
+    mean_bgr = train_item["A"]
+
+    vis = repeat(vis, 'b 1 -> b 1 h w', h=fog_rgb.shape[2], w=fog_rgb.shape[3])
+    beta = -math.log(0.05) / vis
+    mean_bgr = rearrange(mean_bgr, 'b c -> b c 1 1')
+
+    clean_rgb, fog_rgb, beta, transmission_map, metric_depth_map, mean_bgr = clean_rgb.to(local_rank), fog_rgb.to(local_rank), beta.to(local_rank), transmission_map.to(local_rank), metric_depth_map.to(local_rank), mean_bgr.to(local_rank)
+    optimizer.zero_grad()
+    t_output, beta_output = model(fog_rgb, metric_depth_map)
+    loss = training_loss(t_output, beta_output, None,
+                            transmission_map, beta, fog_rgb, clean_rgb, metric_depth_map, epoch, mean_bgr, None, need_det=False)
+    loss.backward()
+
+    nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+    optimizer.step()
+    return loss
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--save_path", type=str)
     parser.add_argument("--root_path", type=str)
+    parser.add_argument("--dataset_type", type=str, default="PixelWise", choices=["PixelWise", "FACI"])
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--num_epochs", type=int, default=80)
     parser.add_argument("--cross_num", type=int, default=3)
@@ -80,8 +127,12 @@ if __name__ == "__main__":
     save_path = f"{args.save_path}_{args.cross_num}"
     batch_size = args.batch_size
     num_epochs = args.num_epochs
-
-    train_dataset = PixelwiseDataset(args.root_path, istrain=True)
+    if args.dataset_type == "PixelWise":
+        train_dataset = PixelwiseDataset(args.root_path, istrain=True)
+        train_function = train_PD
+    else:
+        train_dataset = FACIDataset(args.root_path)
+        train_function = train_FACID
     if ddp:
         train_sampler = DistributedSampler(train_dataset,
                                            num_replicas=world_size,
@@ -93,11 +144,13 @@ if __name__ == "__main__":
     else:
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, drop_last=True)
 
-    model = VitResNet50(cross_num=args.cross_num)
+    model = VitResNet50(cross_num=args.cross_num, need_det=(args.dataset_type=="PixelWise"))
     model.to(local_rank)
     if ddp:
         model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
+    else:
+        model = nn.DataParallel(model)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)  # 学习率衰减
@@ -127,23 +180,7 @@ if __name__ == "__main__":
             train_sampler.set_epoch(epoch)
         train_loader = tqdm(train_loader, desc=f'Epoch train {epoch+1}/{num_epochs}', leave=True)
         for batch_idx, train_item in enumerate(train_loader):
-            clean_rgb = train_item["clean_rgb"]
-            fog_rgb = train_item["fog_rgb"]
-            vis = train_item["vis"]
-            transmission_map = train_item["transmission_map"]
-            metric_depth_map = train_item["metric_depth_map"]
-            mean_bgr = train_item["mean_bgr"]
-            uniform_fog = train_item["uniform_fog"]
-            clean_rgb, fog_rgb, vis, transmission_map, metric_depth_map, mean_bgr, uniform_fog = clean_rgb.to(local_rank), fog_rgb.to(local_rank), vis.to(local_rank), transmission_map.to(local_rank), metric_depth_map.to(local_rank), mean_bgr.to(local_rank), uniform_fog.to(local_rank)
-            beta = 2.995 / vis
-            optimizer.zero_grad()
-            t_output, beta_output, is_uniform_fog = model(fog_rgb, metric_depth_map)
-            loss = training_loss(t_output, beta_output, is_uniform_fog,
-                                 transmission_map, beta, fog_rgb, clean_rgb, metric_depth_map, epoch, mean_bgr, uniform_fog)
-            loss.backward()
-
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
-            optimizer.step()
+            loss = train_function(train_item, model, optimizer, epoch, local_rank)
             train_loss += loss.item()
             train_loader.set_postfix(loss=f'{loss.item():.4f}')
         train_loss /= len(train_loader)
