@@ -5,7 +5,7 @@ from torchvision import models
 from model.basic import *
 
 class VitResNet50(nn.Module):
-    def __init__(self, cross_num):
+    def __init__(self, cross_num, need_det=True):
         super(VitResNet50, self).__init__()
         rgb_stream = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
         self.rgb_stream_backbone = nn.Sequential(*[
@@ -61,8 +61,9 @@ class VitResNet50(nn.Module):
             nn.Conv2d(32, 1, kernel_size=3, padding=1),
             nn.ReLU()  # enforce β ≥ 0
         )
-
-        self.patch_fog_detector = PatchyFogDetection()
+        self.need_det = need_det
+        if need_det:
+            self.patch_fog_detector = PatchyFogDetection()
 
     def forward(self, x_rgb, x_depth):
         # RGB Stream
@@ -112,6 +113,8 @@ class VitResNet50(nn.Module):
         beta = self.head_beta(fusion3)
         t = F.interpolate(t, scale_factor=2.0, mode='bilinear', align_corners=True)
         beta = F.interpolate(beta, scale_factor=2.0, mode='bilinear', align_corners=True)
+        if not self.need_det:
+            return t, beta
         patch_fog = self.patch_fog_detector(t, beta)
         return t, beta, patch_fog
 

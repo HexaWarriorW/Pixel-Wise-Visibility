@@ -20,6 +20,8 @@ from torch.utils.data import DataLoader
 class FACIDataset(Dataset):
     def __init__(self, data_path, phase='train', train_rate=0.7, valid_rate=0.9, height=576//2, width=1024//2):
         assert (phase == 'train' or phase == 'valid' or phase == 'test')
+        self.mean = [0, 0, 0]
+        self.std = [1, 1, 1]
         self.phase = phase
         self.height = height
         self.width = width
