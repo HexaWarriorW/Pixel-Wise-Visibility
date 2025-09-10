@@ -8,6 +8,7 @@ from tqdm import tqdm
 import os
 from model import VitResNet50
 from einops import repeat
+from metric import *
 import argparse
 import matplotlib.pyplot as plt
 plt.rcParams['font.sans-serif'] = ['SimHei']
@@ -48,22 +49,9 @@ def test_PD(val_item, model, device, batch_idx):
     vis = vis.numpy()[0, 0, :, :]
 
     # Post Process
-    v_output_hist = v_output.copy()
-    v_output_hist[v_output_hist>10] = 0
-    v_output_i, v_output_v = np.histogram(v_output_hist, bins=50, range=(v_output_hist.min(), v_output_hist.max()))
-    v_output_i = v_output_i / v_output_i.sum()
-    for index in range(50):
-        if v_output_i[index] < 1e-2:
-            v_output_hist[(v_output_hist > v_output_v[index]) & (v_output_hist <= v_output_v[index + 1])] = 0
-    v_output_i, v_output_v = np.histogram(v_output_hist, bins=50, range=(v_output_hist.min(), v_output_hist.max()))
-    v_output_index = np.argsort(v_output_i)[::-1]
-    v_output_v_sort = v_output_v[v_output_index]
-    # highest among top 3
-    v_output_pred_index = v_output_index[v_output_v_sort[:3].argmax()]
-    if v_output_pred_index == 0 or v_output_pred_index == len(v_output_v) - 1:
-        v_output_pred = v_output_v[v_output_pred_index]
-    else:
-        v_output_pred = (v_output_v[v_output_pred_index] + v_output_v[v_output_pred_index + 1]) / 2
+    v_output_pred, v_output_hist = calc_vis(v_output)
+    v_output_pred = v_output_pred[0]
+    v_output_hist = v_output_hist[0]
     v_output_gt = np.mean(vis)
     if args.vis:
         vis_function(v_output_hist, v_output_pred, v_output_gt, fog_rgb, t_output, v_output, transmission_map, metric_depth_map, vis, batch_idx)
@@ -95,22 +83,9 @@ def test_FACID(val_item, model, device, batch_idx):
     vis = vis.numpy()[0, 0, :, :]
 
     # Post Process
-    v_output_hist = v_output.copy()
-    v_output_hist[v_output_hist>10] = 0
-    v_output_i, v_output_v = np.histogram(v_output_hist, bins=50, range=(v_output_hist.min(), v_output_hist.max()))
-    v_output_i = v_output_i / v_output_i.sum()
-    for index in range(50):
-        if v_output_i[index] < 1e-2:
-            v_output_hist[(v_output_hist > v_output_v[index]) & (v_output_hist <= v_output_v[index + 1])] = 0
-    v_output_i, v_output_v = np.histogram(v_output_hist, bins=50, range=(v_output_hist.min(), v_output_hist.max()))
-    v_output_index = np.argsort(v_output_i)[::-1]
-    v_output_v_sort = v_output_v[v_output_index]
-    # highest among top 3
-    v_output_pred_index = v_output_index[v_output_v_sort[:3].argmax()]
-    if v_output_pred_index == 0 or v_output_pred_index == len(v_output_v) - 1:
-        v_output_pred = v_output_v[v_output_pred_index]
-    else:
-        v_output_pred = (v_output_v[v_output_pred_index] + v_output_v[v_output_pred_index + 1]) / 2
+    v_output_pred, v_output_hist = calc_vis(v_output)
+    v_output_pred = v_output_pred[0]
+    v_output_hist = v_output_hist[0]
     v_output_gt = np.mean(vis)
     if args.vis:
         vis_function(v_output_hist, v_output_pred, v_output_gt, fog_rgb, t_output, v_output, transmission_map, metric_depth_map, vis, batch_idx)

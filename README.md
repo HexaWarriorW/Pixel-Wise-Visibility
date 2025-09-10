@@ -43,15 +43,16 @@ We recommend using a virtual environment (e.g., `venv` or `conda`).
     pip install -r requirements.txt
     ```
 ## Data
-The data is being organized and will be provided upon completion.
+The data can be found at: https://pan.baidu.com/s/15ZcL8GG2I-ZJuT044VS8tw?pwd=mf8j 
 
 ## Usage
 
 ### Training
 ```bash
 OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 train_ddp.py \
-    --save_path <your_path> \
+    --save_path <new_checkpoint_path> \
     --root_path <root_path> \
+    --dataset_type <PixelWise|FACI>
     --batch_size 4 \
     --num_epochs 80 \
     --checkpoint_path <checkpoint_path> \
@@ -68,11 +69,12 @@ OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 train_ddp.py \
 ### Evaluation
 ``` bash
 python3 validate.py \
-    --dataset_file <dataset_file> \
-    --checkpoint_path <checkpoint_path> \
+    --root_path <root_path> \
+    --dataset_type <PixelWise|FACI>
+    --batch_size 4 \
     --cross_num 3 \
-    --batch_size 4
-
+    --checkpoint_path <checkpoint_path> \
+    <--cal_flops>
 ```
 ## Citation
 Displayed after the paper is accepted.
@@ -81,7 +83,7 @@ Displayed after the paper is accepted.
 @inproceedings{Pixel-Wise-Visibility,
   title     = {Joint Modeling of Pixel Wise Visibility and Fog Structure for Real World Scene Understanding},
   author    = {JIAYU WU, JIAHENG LI, JIANQIANG WANG, XUEZHE XU, SIDAN DU, and YANG LI.},
-  booktitle = {IEEE Access},
+  booktitle = {Atmosphere},
   year      = {2025}
 }
 ``` -->

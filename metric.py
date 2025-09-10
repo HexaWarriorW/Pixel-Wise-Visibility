@@ -67,3 +67,27 @@ def print_gradients(model):
             print(f"{name} grad norm: {param.grad.norm().item():.4f}")
         else:
             print(f"{name} grad: None")
+
+def calc_vis(v_output):
+    v_output_preds, v_output_hists = [], []
+    for b in range(v_output.shape[0]):
+        v_output_hist = v_output[b:b+1].copy()
+        v_output_hist[v_output_hist>10] = 0
+        v_output_i, v_output_v = np.histogram(v_output_hist, bins=50, range=(v_output_hist.min(), v_output_hist.max()))
+        v_output_i = v_output_i / v_output_i.sum()
+        for index in range(50):
+            if v_output_i[index] < 1e-2:
+                v_output_hist[(v_output_hist > v_output_v[index]) & (v_output_hist <= v_output_v[index + 1])] = 0
+        v_output_i, v_output_v = np.histogram(v_output_hist, bins=50, range=(v_output_hist.min(), v_output_hist.max()))
+        v_output_index = np.argsort(v_output_i)[::-1]
+        v_output_v_sort = v_output_v[v_output_index]
+        # highest among top 3
+        v_output_pred_index = v_output_index[v_output_v_sort[:3].argmax()]
+        if v_output_pred_index == 0 or v_output_pred_index == len(v_output_v) - 1:
+            v_output_pred = v_output_v[v_output_pred_index]
+        else:
+            v_output_pred = (v_output_v[v_output_pred_index] + v_output_v[v_output_pred_index + 1]) / 2
+        v_output_preds.append(v_output_pred)
+        v_output_hists.append(v_output_hist)
+    v_output_preds = np.array(v_output_preds)
+    return v_output_preds, v_output_hists
