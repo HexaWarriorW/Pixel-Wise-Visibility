@@ -46,7 +46,7 @@ def training_loss(pred_t, pred_beta, is_uniform_fog,
     total_loss = loss_vis * args.lambda1 + loss_det * args.lambda2
     return total_loss
 
-def train_PD(train_item, model, optimizer, epoch, local_rank):
+def train_VisNet_PD(train_item, model, optimizer, epoch, local_rank):
     clean_rgb = train_item["clean_rgb"]
     fog_rgb = train_item["fog_rgb"]
     vis = train_item["vis"]
@@ -66,7 +66,7 @@ def train_PD(train_item, model, optimizer, epoch, local_rank):
     optimizer.step()
     return loss
 
-def train_FACID(train_item, model, optimizer, epoch, local_rank):
+def train_VisNet_FACID(train_item, model, optimizer, epoch, local_rank):
     clean_rgb = train_item["Scene"]
     fog_rgb = train_item["FoggyScene_0.05"]
     vis = train_item["Visibility"] / 1000
@@ -128,11 +128,11 @@ if __name__ == "__main__":
     batch_size = args.batch_size
     num_epochs = args.num_epochs
     if args.dataset_type == "PixelWise":
-        train_dataset = PixelwiseDataset(args.root_path, istrain=True)
-        train_function = train_PD
+        train_dataset = PixelwiseDataset(args.root_path, phase='train', istrain=True)
+        train_function = train_VisNet_PD
     else:
         train_dataset = FACIDataset(args.root_path)
-        train_function = train_FACID
+        train_function = train_VisNet_FACID
     if ddp:
         train_sampler = DistributedSampler(train_dataset,
                                            num_replicas=world_size,
@@ -144,7 +144,7 @@ if __name__ == "__main__":
     else:
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, drop_last=True)
 
-    model = VitResNet50(cross_num=args.cross_num, need_det=(args.dataset_type=="PixelWise"))
+    model = VitNet(cross_num=args.cross_num, need_det=(args.dataset_type=="PixelWise"))
     model.to(local_rank)
     if ddp:
         model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])

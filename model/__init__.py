@@ -1,3 +1,3 @@
 from .basic import *
-from .network import *
+from .VisNet import *
 from .DMRVisNet import *

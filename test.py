@@ -6,7 +6,7 @@ from dataset import *
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import os
-from model import VitResNet50
+from model import *
 from einops import repeat
 from metric import *
 import argparse
@@ -29,7 +29,7 @@ def create_histgram_plot(data, pred, gt, gt_list, dpi=100):
     plt.show()
 
 # TODO: ONLY SUPPORT BATCH SIZE 1
-def test_PD(val_item, model, device, batch_idx):
+def test_VisNet_PD(val_item, model, device, batch_idx):
     fog_rgb = val_item["fog_rgb"]
     vis = val_item["vis"]
     transmission_map = val_item["transmission_map"]
@@ -55,12 +55,14 @@ def test_PD(val_item, model, device, batch_idx):
     v_output_gt = np.mean(vis)
     if args.vis:
         vis_function(v_output_hist, v_output_pred, v_output_gt, fog_rgb, t_output, v_output, transmission_map, metric_depth_map, vis, batch_idx)
-
+    # in meters
+    v_output_pred *= 1000
+    v_output_gt *= 1000
     return v_output_pred, v_output_gt, uniform_fog.item(), is_uniform_fog.item()
 
 
 # TODO: ONLY SUPPORT BATCH SIZE 1
-def test_FACID(val_item, model, device, batch_idx):
+def test_VisNet_FACID(val_item, model, device, batch_idx):
     fog_rgb = val_item["FoggyScene_0.05"]
     vis = val_item["Visibility"]
     transmission_map = val_item["t_0.05"]
@@ -89,13 +91,15 @@ def test_FACID(val_item, model, device, batch_idx):
     v_output_gt = np.mean(vis)
     if args.vis:
         vis_function(v_output_hist, v_output_pred, v_output_gt, fog_rgb, t_output, v_output, transmission_map, metric_depth_map, vis, batch_idx)
-
+    # in meters
+    v_output_pred *= 1000
+    v_output_gt *= 1000
     return v_output_pred, v_output_gt, 0, 0
 
 def vis_function(v_output_hist, v_output_pred, v_output_gt, fog_rgb, t_output, v_output, transmission_map, metric_depth_map, vis, batch_idx):
     create_histgram_plot(v_output_hist.flatten()*1000, v_output_pred*1000, v_output_gt*1000, [np.max(vis)*1000, np.min(vis)*1000])
     fog_rgb_vis = fog_rgb.detach().cpu().permute(0, 2, 3, 1)[0].numpy()
-    fog_rgb_vis = fog_rgb_vis * val_dataset.std + val_dataset.mean
+    fog_rgb_vis = fog_rgb_vis * test_dataset.std + test_dataset.mean
     fog_rgb_vis = (fog_rgb_vis * 255).astype(np.uint8)
     fog_rgb_vis = cv2.cvtColor(fog_rgb_vis, cv2.COLOR_RGB2BGR)
 
@@ -151,29 +155,28 @@ if __name__ == "__main__":
     parser.add_argument("--vis", action="store_true")
     args, _ = parser.parse_known_args()
     if args.dataset_type == "PixelWise":
-        val_dataset = PixelwiseDataset(args.root_path, istrain=False)
-        val_function = test_PD
+        test_dataset = PixelwiseDataset(args.root_path, phase='test', istrain=False)
+        test_function = test_VisNet_PD
     else:
-        val_dataset = FACIDataset(args.root_path, phase='test')
-        val_function = test_FACID
+        test_dataset = FACIDataset(args.root_path, phase='test')
+        test_function = test_VisNet_FACID
 
     plt.ion()
-    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=1, drop_last=True)
-    model = VitResNet50(cross_num=args.cross_num, need_det=(args.dataset_type=="PixelWise"))
+    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=1, drop_last=True)
+    model = VitNet(cross_num=args.cross_num, need_det=(args.dataset_type=="PixelWise"))
     checkpoint = torch.load(args.checkpoint_path, map_location='cpu')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
     model = nn.DataParallel(model)
     model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-
     model.eval()
     v_output_gt_list = []
     v_output_pred_list = []
-    val_loader = tqdm(val_loader, leave=True)
+    test_loader = tqdm(test_loader, leave=True)
     with torch.no_grad():
-        for batch_idx, val_item in enumerate(val_loader):
-            v_output_pred, v_output_gt, uniform_fog, is_uniform_fog = val_function(val_item, model, device, batch_idx)
-            val_loader.set_postfix(
+        for batch_idx, val_item in enumerate(test_loader):
+            v_output_pred, v_output_gt, uniform_fog, is_uniform_fog = test_function(val_item, model, device, batch_idx)
+            test_loader.set_postfix(
                 vg = f"{v_output_gt:.3f}", 
                 vp = f"{v_output_pred:.3f}",
                 ug = f"{uniform_fog:.3f}",

@@ -10,7 +10,7 @@ from model import *
 import argparse
 from thop import profile as t_profile
 
-def val_PD(val_item, model, device):
+def val_VisNet_PD(val_item, model, device):
     fog_rgb = val_item["fog_rgb"]
     vis = val_item["vis"]
     transmission_map = val_item["transmission_map"]
@@ -31,10 +31,12 @@ def val_PD(val_item, model, device):
 
     v_output_pred, _ = calc_vis(v_output)
     v_output_gt = np.mean(vis)
-    
+    # in meters
+    v_output_pred *= 1000
+    v_output_gt *= 1000
     return v_output_pred, v_output_gt, uniform_fog.numpy(), is_uniform_fog
 
-def val_FACID(val_item, model, device):
+def val_VisNet_FACID(val_item, model, device):
     fog_rgb = val_item["FoggyScene_0.05"]
     vis = val_item["Visibility"]
     transmission_map = val_item["t_0.05"]
@@ -58,7 +60,9 @@ def val_FACID(val_item, model, device):
 
     v_output_pred, _ = calc_vis(v_output)
     v_output_gt = np.mean(vis.reshape(vis.shape[0], -1), axis=1)
-
+    # in meters
+    v_output_pred *= 1000
+    v_output_gt *= 1000
     return v_output_pred, v_output_gt, 0, 0
 
 if __name__ == "__main__":
@@ -72,19 +76,18 @@ if __name__ == "__main__":
     args, _ = parser.parse_known_args()
     cal_flops = args.cal_flops
     if args.dataset_type == "PixelWise":
-        val_dataset = PixelwiseDataset(args.root_path, istrain=False)
-        val_function = val_PD
+        val_dataset = PixelwiseDataset(args.root_path, phase='val', istrain=False)
+        val_function = val_VisNet_PD
     else:
         val_dataset = FACIDataset(args.root_path, phase='valid')
-        val_function = val_FACID
+        val_function = val_VisNet_FACID
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, drop_last=True)
-    model = VitResNet50(cross_num=args.cross_num, need_det=(args.dataset_type=="PixelWise"))
+    model = VitNet(cross_num=args.cross_num, need_det=(args.dataset_type=="PixelWise"))
     checkpoint = torch.load(args.checkpoint_path, map_location='cpu')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
     model = nn.DataParallel(model)
     model.load_state_dict(checkpoint['model_state_dict'])
-    
     model.eval()
     val_loader = tqdm(val_loader, leave=True)
     with torch.no_grad():

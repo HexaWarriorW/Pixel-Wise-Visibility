@@ -10,8 +10,8 @@ from torchvision.transforms import functional as F
 
 
 class PixelwiseDataset(Dataset):
-    def __init__(self, path, istrain=True, isVis=False):
-        self.filenames = os.listdir(path)
+    def __init__(self, path, phase, istrain=True, isVis=False):
+        self.filenames = os.listdir(path, phase)
         self.filenames = [os.path.join(path, file) for file in self.filenames]
         self.istrain = istrain
         self.isVis = isVis
@@ -111,12 +111,12 @@ class PixelwiseDataset(Dataset):
 
 
 if __name__ == "__main__":
-    root_path = "/media/arthurthomas/Data/dataset/fog_dataset/val/"
-    val_dataset = PixelwiseDataset(root_path, istrain=False, isVis=True)
+    root_path = "/media/arthurthomas/Data/dataset/fog_dataset/"
+    test_dataset = PixelwiseDataset(root_path, "test", istrain=False, isVis=True)
 
     batch_size = 1
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0, drop_last=True)
-    for batch_idx, val_item in enumerate(val_loader):
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0, drop_last=True)
+    for batch_idx, val_item in enumerate(test_loader):
         clean_rgb = (val_item["clean_rgb"].permute(0, 2, 3, 1)[0].numpy() * 255).astype(np.uint8)
         fog_rgb = (val_item["fog_rgb"].permute(0, 2, 3, 1)[0].numpy() * 255).astype(np.uint8)
         vis = val_item["vis"].permute(0, 2, 3, 1)[0].numpy()

@@ -4,9 +4,9 @@ import torch.nn.functional as F
 from torchvision import models
 from model.basic import *
 
-class VitResNet50(nn.Module):
+class VitNet(nn.Module):
     def __init__(self, cross_num, need_det=True):
-        super(VitResNet50, self).__init__()
+        super(VitNet, self).__init__()
         rgb_stream = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
         self.rgb_stream_backbone = nn.Sequential(*[
             rgb_stream.conv1,
