@@ -11,8 +11,8 @@ from torchvision.transforms import functional as F
 
 class PixelwiseDataset(Dataset):
     def __init__(self, path, phase, istrain=True, isVis=False):
-        self.filenames = os.listdir(path, phase)
-        self.filenames = [os.path.join(path, file) for file in self.filenames]
+        self.filenames = os.listdir(os.path.join(path, phase))
+        self.filenames = [os.path.join(path, phase,file) for file in self.filenames]
         self.istrain = istrain
         self.isVis = isVis
         self.mean = [0.63233793, 0.62714498, 0.61009363]
