@@ -9,6 +9,8 @@ from einops import repeat
 from model import *
 import argparse
 from thop import profile as t_profile
+from sklearn.metrics import precision_recall_curve, auc
+
 
 def val_VisNet_PD(val_item, model, device):
     fog_rgb = val_item["fog_rgb"]
@@ -18,10 +20,15 @@ def val_VisNet_PD(val_item, model, device):
     uniform_fog = val_item["uniform_fog"]
 
     fog_rgb, metric_depth_map = fog_rgb.to(device), metric_depth_map.to(device)
-    t_output, beta_output, is_uniform_fog = model(fog_rgb, metric_depth_map)
+    if args.patchy:
+        t_output, beta_output, is_uniform_fog = model(fog_rgb, metric_depth_map)
+        is_uniform_fog = nn.Sigmoid()(is_uniform_fog).detach().cpu().numpy()
+    else:
+        t_output, beta_output = model(fog_rgb, metric_depth_map)
+        is_uniform_fog = torch.zeros([*uniform_fog.shape], uniform_fog.dtype).numpy()
+        uniform_fog = torch.zeros([*uniform_fog.shape], uniform_fog.dtype)
     t_output = t_output.detach().cpu().numpy()
     beta_output = beta_output.detach().cpu().numpy()
-    is_uniform_fog = nn.Sigmoid()(is_uniform_fog).detach().cpu().numpy()
 
     metric_depth_map = metric_depth_map.cpu().numpy()
     v_output = 2.995 / (beta_output + 1e-6)
@@ -69,9 +76,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--root_path", type=str)
     parser.add_argument("--dataset_type", type=str, default="PixelWise", choices=["PixelWise", "FACI"])
+    parser.add_argument("--model_type", type=str, default="VisNet", choices=["VisNet", "DMRVisNet"])
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--cross_num", type=int, default=3)
     parser.add_argument("--checkpoint_path", type=str)
+    parser.add_argument("--patchy", action="store_true")
     parser.add_argument("--cal_flops", action="store_true")
     args, _ = parser.parse_known_args()
     cal_flops = args.cal_flops
@@ -81,8 +90,12 @@ if __name__ == "__main__":
     else:
         val_dataset = FACIDataset(args.root_path, phase='valid')
         val_function = val_VisNet_FACID
+        args.patchy = False
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, drop_last=True)
-    model = VitNet(cross_num=args.cross_num, need_det=(args.dataset_type=="PixelWise"))
+    if args.model_type == "VisNet":
+        model = VitNet(cross_num=args.cross_num, need_det=(args.patchy and args.dataset_type=="PixelWise"))
+    else:
+        model = DMRVisNet()
     checkpoint = torch.load(args.checkpoint_path, map_location='cpu')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
@@ -92,6 +105,9 @@ if __name__ == "__main__":
     val_loader = tqdm(val_loader, leave=True)
     with torch.no_grad():
         errors = np.zeros((len(val_loader) * args.batch_size, 3))
+        if args.patchy:
+            uniform_fog = np.zeros((len(val_loader) * args.batch_size))
+            is_uniform_fog = np.zeros((len(val_loader) * args.batch_size))
         for batch_idx, val_item in enumerate(val_loader):
             if cal_flops:
                 fog_rgb = val_item['fog_rgb'].to(device)
@@ -105,7 +121,22 @@ if __name__ == "__main__":
             absrel_val = AbsRel(v_output_pred, v_output_gt)
             sqrel_val = SqRel(v_output_pred, v_output_gt)
             rmse_val = rmse(v_output_pred, v_output_gt)
+            if args.patchy:
+                y_true = np.array(data["v_output_gt"]).reshape(-1)
+                y_scores = np.array(data["v_output_pred"]).reshape(-1)
             errors[batch_idx * args.batch_size:(batch_idx + 1) * args.batch_size] = np.stack([absrel_val, sqrel_val, rmse_val], 1)
-
+            uniform_fog[batch_idx * args.batch_size:(batch_idx + 1) * args.batch_size] = uniform_fog.reshape(-1)
+            is_uniform_fog[batch_idx * args.batch_size:(batch_idx + 1) * args.batch_size] = is_uniform_fog.reshape(-1)
         error_mean = errors.mean(axis=0)
         print(f"cross_num {args.cross_num} AbsRel: {error_mean[0]:.3f}, SqRel: {error_mean[1]:.3f}, RMSE: {error_mean[2]:.3f}")
+        if args.patchy:
+            precision_val, recall_val, thresholds = precision_recall_curve(y_true, y_scores)
+            f1_scores = 2 * (precision_val * recall_val) / (precision_val + recall_val)
+            confusion_matrix = compute_confusion_matrix_elements((is_uniform_fog > 0.5).astype(np.int), uniform_fog.astype(np.int))
+            precision_val = precision(confusion_matrix)
+            recall_val = recall(confusion_matrix)
+            accuracy_val = accuracy(confusion_matrix)
+            print(f"Uniform fog detection - Precision: {precision_val:.3f}, Recall: {recall_val:.3f}, Accuracy: {accuracy_val:.3f}")
+            best_index = f1_scores.argmax()
+            auc_score = auc(recall_val, precision_val)
+            print(f"Patchy fog detection - Best F1: {f1_scores[best_index]:.3f}, Precision: {precision_val[best_index]:.3f}, Recall: {recall_val[best_index]:.3f}, AUC: {auc_score:.3f}")
