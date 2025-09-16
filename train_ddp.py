@@ -105,18 +105,18 @@ def train_VisNet_FACID(train_item, model, optimizer, epoch, local_rank):
 def train_DMRVisNet_PD(train_item, model, optimizer, epoch, local_rank):
     clean_rgb = train_item["clean_rgb"]
     fog_rgb = train_item["fog_rgb"]
-    vis = train_item["vis"]
+    vis = train_item["vis"] * 1000
     transmission_map = train_item["transmission_map"]
-    metric_depth_map = train_item["metric_depth_map"]
+    metric_depth_map = train_item["metric_depth_map"] * 1000
+    metric_depth_map = 1 / metric_depth_map
     mean_bgr = train_item["mean_bgr"]
     uniform_fog = train_item["uniform_fog"]
     clean_rgb, fog_rgb, vis, transmission_map, metric_depth_map, mean_bgr, uniform_fog = clean_rgb.to(local_rank), fog_rgb.to(local_rank), vis.to(local_rank), transmission_map.to(local_rank), metric_depth_map.to(local_rank), mean_bgr.to(local_rank), uniform_fog.to(local_rank)
-    beta = 2.995 / vis
+    beta = -2.995 / vis
     optimizer.zero_grad()
     pred_a, pred_t, pred_d, pred_defog, pred_vis = model(fog_rgb)
-    metric_depth_map = 1 / metric_depth_map
     loss = training_DMRVisNet_loss(pred_a, pred_t, pred_d, pred_defog, pred_vis,
-                            transmission_map, mean_bgr, torch.zeros_like(transmission_map).bool().to(local_rank), metric_depth_map, clean_rgb, -beta)
+                            transmission_map, mean_bgr, torch.zeros_like(transmission_map).bool().to(local_rank), metric_depth_map, clean_rgb, beta)
     loss.backward()
 
     optimizer.step()
@@ -126,7 +126,7 @@ def train_DMRVisNet_PD(train_item, model, optimizer, epoch, local_rank):
 def train_DMRVisNet_FACID(train_item, model, optimizer, epoch, local_rank):
     clean_rgb = train_item["Scene"]
     fog_rgb = train_item["FoggyScene_0.05"]
-    vis = train_item["Visibility"] / 1000
+    vis = train_item["Visibility"]
     transmission_map = train_item["t_0.05"]
     metric_depth_map = train_item["DepthPerspective"]
     mask = train_item["SkyMask"]
@@ -218,10 +218,9 @@ if __name__ == "__main__":
         model = nn.DataParallel(model)
     if args.model_type == "VisNet":
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)  # 学习率衰减
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=2e-4, weight_decay=1e-6)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)  # 学习率衰减
     if args.checkpoint_path:
         checkpoint = torch.load(args.checkpoint_path, weights_only=True)
         model_state_dict = checkpoint['model_state_dict']
@@ -256,7 +255,7 @@ if __name__ == "__main__":
             train_loss += loss.item()
             train_loader.set_postfix(loss=f'{loss.item():.4f}')
         train_loss /= len(train_loader)
-        scheduler.step()  # 更新学习率
+        scheduler.step()
         os.makedirs(save_path, exist_ok=True)
         torch.save({
             'model_state_dict': model.state_dict(),
